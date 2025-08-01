@@ -45,6 +45,37 @@ class AgenticLayer:
                     for chunk in (response.content[i:i+1900] for i in range(0, len(response.content), 1900)):
                         await message.channel.send(chunk)
 
+                    # Check if the user wants to create a GIF search tool
+                    if "write and register a tool that searches giphy for gifs and returns the first url" in text.lower():
+                        await self._create_giphy_tool(message)
+
+    async def _create_giphy_tool(self, message):
+        # Define the tool code
+        tool_code = textwrap.dedent("""
+        async def run(ctx, *, query: str):
+            import aiohttp
+            async with aiohttp.ClientSession() as session:
+                async with session.get(f"https://api.giphy.com/v1/gifs/search?api_key=YOUR_GIPHY_API_KEY&q={query}&limit=1") as resp:
+                    data = await resp.json()
+                    if data['data']:
+                        gif_url = data['data'][0]['images']['original']['url']
+                        await ctx.send(gif_url)
+                    else:
+                        await ctx.send("No GIFs found.")
+        """)
+        # Register the tool
+        self.bot.bot.add_command(commands.Command(self._callable("gif"), name="gif"))
+        # Save the tool code to the registry
+        self.registry["gif"] = tool_code
+        self.save_registry()
+        await message.channel.send("✅ Tool `!gif` registered. You can now use `!gif <query>` to search for GIFs.")
+
+    def _callable(self, name: str):
+        code = self.registry[name]
+        loc = {}
+        exec(textwrap.dedent(code), loc)
+        return loc["run"]
+
     def _build_agent(self):
         api_keys = {
             "groq": os.environ["GROQ_API_KEY"],
@@ -53,6 +84,7 @@ class AgenticLayer:
             "redis": os.environ["REDIS_PASSWORD"],
         }
 
+        # Load instructions from file
         instructions = Path("instructions.txt").read_text()
 
         memory_db = RedisMemoryDb(
@@ -96,6 +128,7 @@ class AgenticLayer:
             storage=storage,
             session_id="hero",
             tools=tools,
+            description="A helpful personal assistant chatbot that can search the web, generate images, and remember user preferences.",
             instructions=instructions,
             add_history_to_messages=True,
             num_history_runs=3,
