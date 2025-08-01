@@ -19,6 +19,7 @@ firecrawl-py
 crawl4ai
 requests
 beautifulsoup4
+spider
 
 # ---------- cloud & sandbox ----------
 
