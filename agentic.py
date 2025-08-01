@@ -150,6 +150,14 @@ class AgenticLayer:
                     await ctx.send(f"{ctx.author.mention} {url}")
                 else:
                     await ctx.send("❌ Pollinations borked.", delete_after=4)
+            @bot.command(name="hello")          # or use name=None for global
+    async def _chat(ctx, *, text: str):
+            if ctx.author.id != bot.bot.user.id:
+                return
+            await ctx.message.delete(delay=1.5)
+            response = await self.agent.arun(text)
+            for chunk in (response.content[i:i+1900] for i in range(0, len(response.content), 1900)):
+                await ctx.send(chunk)
 
     # ---------- dynamic wrapper ----------
     def _callable(self, name: str):
