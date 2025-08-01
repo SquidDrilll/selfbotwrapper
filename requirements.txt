@@ -28,6 +28,7 @@ discord.py-self==1.7.3
 python-dotenv
 agno==1.7.6
 pillow
+
 aiohttp
 redis
 openai
