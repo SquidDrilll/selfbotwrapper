@@ -19,7 +19,7 @@ from agno.tools.googlesearch import GoogleSearchTools
 from agno.tools.spider import SpiderTools
 from agno.tools.yfinance import YFinanceTools
 from agno.memory.v2.db.redis import RedisMemoryDb
-from agno.memory.v2.memory import Memory  # Ensure this import is present
+from agno.memory.v2.memory import Memory
 from agno.storage.redis import RedisStorage
 
 REGISTRY_FILE = "tools.json"
@@ -124,22 +124,23 @@ class AgenticLayer:
         instructions = Path("instructions.txt").read_text()
 
         # Redis setup
-        redis_pass = os.getenv("REDIS_PASSWORD")
-        if redis_pass:
+        redis_url = os.getenv("UPSTASH_REDIS_REST_URL")
+        redis_token = os.getenv("UPSTASH_REDIS_REST_TOKEN")
+        if redis_url and redis_token:
             memory = Memory(
                 db=RedisMemoryDb(
                     prefix="agno_memory",
-                    host="usable-marmot-6518.upstash.io",
+                    host=redis_url,
                     port=6379,
-                    password=redis_pass,
+                    password=redis_token,
                     ssl=True,
                 )
             )
             storage = RedisStorage(
                 prefix="agno_storage",
-                host="usable-marmot-6518.upstash.io",
+                host=redis_url,
                 port=6379,
-                password=redis_pass,
+                password=redis_token,
                 ssl=True,
             )
         else:
