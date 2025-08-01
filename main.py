@@ -1,3 +1,4 @@
+
 # main.py
 import os
 from dotenv import load_dotenv
@@ -9,11 +10,11 @@ load_dotenv()
 
 bot = SelfBot(
     token=os.getenv("DISCORD_TOKEN"),
-    prefix="!",
+    prefix=".",
 )
 
 setup_tldr(bot)
-AgenticLayer(bot)   # ← new layer
+AgenticLayer(bot)
 
 if __name__ == "__main__":
     bot.run()
