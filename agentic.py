@@ -5,13 +5,10 @@ import re
 import textwrap
 import aiohttp
 import asyncio
-import warnings
 from pathlib import Path
 from typing import Dict
 from discord.ext import commands
 from selfbot import SelfBot
-
-warnings.filterwarnings("ignore")
 
 from agno.agent import Agent
 from agno.models.groq import Groq
@@ -21,16 +18,19 @@ from agno.tools.file import FileTools
 from agno.tools.googlesearch import GoogleSearchTools
 from agno.tools.spider import SpiderTools
 from agno.tools.yfinance import YFinanceTools
+from agno.memory.v2.db.redis import RedisMemoryDb
+from agno.memory.v2.memory import Memory  # Ensure this import is present
+from agno.storage.redis import RedisStorage
 
-REGISTRY_FILE   = "tools.json"
-CHAT_HISTORY    = "chat_history.json"
+REGISTRY_FILE = "tools.json"
+CHAT_HISTORY = "chat_history.json"
 
 class AgenticLayer:
     def __init__(self, bot: SelfBot):
         self.bot = bot
         self.registry = self._load_json(REGISTRY_FILE, {})
-        self.chats    = self._load_json(CHAT_HISTORY, {})
-        self.agent    = self._build_agent()
+        self.chats = self._load_json(CHAT_HISTORY, {})
+        self.agent = self._build_agent()
 
         @bot.event
         async def on_message(message):
@@ -40,36 +40,35 @@ class AgenticLayer:
             if not text:
                 return
 
-            # record chat (DM / group)
+            # Record chat (DM / group)
             cid = str(message.channel.id)
             self.chats.setdefault(cid, []).append({
                 "author": str(message.author),
-                "msg":    message.content,
-                "ts":     message.created_at.isoformat()
+                "msg": message.content,
+                "ts": message.created_at.isoformat()
             })
             self._save_json(CHAT_HISTORY, self.chats)
 
             try:
-                # 1. create tool
+                # 1. Create tool
                 if text.lower().startswith("create tool"):
                     await self._create_tool(message, text[11:].strip())
                     return
 
-                # 2. list tools
+                # 2. List tools
                 if text.lower() == "list tools":
                     tools = ", ".join(self.registry.keys()) or "none"
                     await message.channel.send(f"Tools: {tools}")
                     return
 
-                # 3. chat / run tool
+                # 3. Chat / run tool
                 response = await self.agent.arun(text)
                 for chunk in (response.content[i:i+1900] for i in range(0, len(response.content), 1900)):
                     await message.channel.send(chunk)
 
-            except Exception:
-                pass  # never crash
+            except Exception as e:
+                print(f"Error processing message: {e}")  # Debugging log
 
-    # ---------- tool creation ----------
     async def _create_tool(self, message, desc):
         while True:
             try:
@@ -83,20 +82,21 @@ class AgenticLayer:
                 code = textwrap.dedent(code_raw.content).strip()
                 name = re.findall(r"def\s+(\w+)\s*\(", code)[0]
 
-                # local compile test
+                # Local compile test
                 loc = {}
                 exec(code, loc)
                 func = loc[name]
 
-                # remote sandbox test
+                # Remote sandbox test
                 test_src = code + '\nimport asyncio; asyncio.run(run(None, query="test"))'
                 payload = {"language": "python", "source": test_src}
                 async with aiohttp.ClientSession() as s:
-                    r = await s.post("https://emkc.org/api/v1/piston/execute   ", json=payload)
+                    r = await s.post("https://emkc.org/api/v1/piston/execute", json=payload)
                     res = await r.json()
                     if res.get("run", {}).get("code") == 0:
                         break
-            except Exception:
+            except Exception as e:
+                print(f"Error creating tool: {e}")  # Debugging log
                 await asyncio.sleep(1)
 
         self.registry[name] = code
@@ -110,7 +110,6 @@ class AgenticLayer:
         exec(textwrap.dedent(code), loc)
         return loc[name]
 
-    # ---------- helpers ----------
     def _load_json(self, file: str, default):
         if Path(file).exists():
             with open(file, "r", encoding="utf-8") as f:
@@ -123,9 +122,36 @@ class AgenticLayer:
 
     def _build_agent(self):
         instructions = Path("instructions.txt").read_text()
+
+        # Redis setup
+        redis_pass = os.getenv("REDIS_PASSWORD")
+        if redis_pass:
+            memory = Memory(
+                db=RedisMemoryDb(
+                    prefix="agno_memory",
+                    host="usable-marmot-6518.upstash.io",
+                    port=6379,
+                    password=redis_pass,
+                    ssl=True,
+                )
+            )
+            storage = RedisStorage(
+                prefix="agno_storage",
+                host="usable-marmot-6518.upstash.io",
+                port=6379,
+                password=redis_pass,
+                ssl=True,
+            )
+        else:
+            memory = None
+            storage = None
+
         return Agent(
             name="Mist",
             model=Groq(id="moonshotai/kimi-k2-instruct", api_key=os.getenv("GROQ_API_KEY")),
+            memory=memory,
+            storage=storage,
+            session_id="hero",
             tools=[
                 CalculatorTools(),
                 DuckDuckGoTools(),
@@ -148,3 +174,8 @@ class AgenticLayer:
             show_tool_calls=True,
             debug_mode=False,
         )
+
+if __name__ == "__main__":
+    bot = SelfBot(token=os.getenv("DISCORD_TOKEN"), prefix=".")
+    AgenticLayer(bot)
+    bot.run()
