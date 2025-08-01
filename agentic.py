@@ -108,7 +108,7 @@ class AgenticLayer:
             model=Groq(id="moonshotai/kimi-k2-instruct", api_key=api_keys["groq"]),
             memory=Memory(db=memory_db),
             storage=storage,
-            session_id="hero",
+            session_id="mist",
             tools=tools,
             instructions=instructions,
             add_history_to_messages=True,
