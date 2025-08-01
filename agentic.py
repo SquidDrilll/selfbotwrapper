@@ -51,11 +51,9 @@ class AgenticLayer:
                             await message.channel.send(chunk)
 
     async def _create_tool(self, message, text):
-        max_retries = 5
-        retries = 0
         success = False
 
-        while retries < max_retries and not success:
+        while not success:
             try:
                 # Extract the tool description from the message
                 tool_description = text.split("write and register a tool that", 1)[1].strip()
@@ -66,15 +64,13 @@ class AgenticLayer:
                 # Generate the tool code using the agent
                 tool_code = await self.agent.arun(f"Write a single async Python function named 'run' that {tool_description}.")
                 if not tool_code.content:
-                    await message.channel.send("Failed to generate the tool code.")
-                    retries += 1
+                    await message.channel.send("Failed to generate the tool code. Retrying...")
                     continue
 
                 # Extract the function name from the generated code
                 function_name = re.findall(r"def\s+(\w+)\s*\(", tool_code.content)
                 if not function_name:
-                    await message.channel.send("Failed to extract the function name from the generated code.")
-                    retries += 1
+                    await message.channel.send("Failed to extract the function name from the generated code. Retrying...")
                     continue
                 function_name = function_name[0]
 
@@ -85,11 +81,7 @@ class AgenticLayer:
                 await message.channel.send(f"✅ Tool `!{function_name}` registered. You can now use `!{function_name} <args>`.")
                 success = True
             except Exception as e:
-                await message.channel.send(f"Failed to create tool: {e}")
-                retries += 1
-
-        if not success:
-            await message.channel.send("Failed to create the tool after multiple attempts.")
+                await message.channel.send(f"Failed to create tool: {e}. Retrying...")
 
     def _callable(self, name: str):
         try:
@@ -167,4 +159,6 @@ class AgenticLayer:
             num_history_runs=3,
             markdown=True,
             show_tool_calls=True,
+            monitoring=True,  # Enable monitoring
+            debug_mode=True,  # Enable debug mode
         )
