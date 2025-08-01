@@ -25,6 +25,8 @@ from agno.tools.spider import SpiderTools
 from agno.tools.website import WebsiteTools
 from agno.tools.yfinance import YFinanceTools
 
+REGISTRY_FILE = "agentic_tools.json"
+
 class AgenticLayer:
     def __init__(self, bot: SelfBot):
         self.bot = bot
@@ -34,10 +36,12 @@ class AgenticLayer:
         async def on_message(message):
             if message.author.id != bot.bot.user.id:
                 return
-            if message.content.startswith("!"):
+            if message.content.startswith("."):
                 text = message.content[1:].strip()
                 if text:
+                    print(f"Processing message: {text}")  # Debugging line
                     response = await self.agent.arun(text)
+                    print(f"Agent response: {response.content}")  # Debugging line
                     for chunk in (response.content[i:i+1900] for i in range(0, len(response.content), 1900)):
                         await message.channel.send(chunk)
 
