@@ -33,24 +33,17 @@ class AgenticLayer:
         self.bot = bot
         self.registry: Dict[str, str] = {}
         self.load_registry()
-
-        # build the core Agno agent
         self.agent = self._build_agent()
-
-        # meta commands
-        bot.command("add")(self.add_tool)
-        bot.command("gen")(self.gen_image)
 
         # expose auto-generated tools
         for name in self.registry:
             self.bot.bot.add_command(commands.Command(self._callable(name), name=name))
 
-        # ---------- NEW chat command ----------
-        @bot.command(name="hello")
-        async def _chat(ctx, *, text: str):
+        # ---------- UNIVERSAL CHAT HANDLER ----------
+        @bot.command(name="*", invoke_without_command=True)
+        async def universal(ctx, *, text: str):
             if ctx.author.id != bot.bot.user.id:
                 return
-            await ctx.message.delete(delay=1.5)
             response = await self.agent.arun(text)
             for chunk in (response.content[i:i+1900] for i in range(0, len(response.content), 1900)):
                 await ctx.send(chunk)
@@ -129,27 +122,16 @@ class AgenticLayer:
         """!add an tool that will ..."""
         if ctx.author.id != self.bot.bot.user.id:
             return
-        await ctx.message.delete(delay=1.5)
-
-        prompt = (
-            "Write a single async Python function named 'run'.\n"
-            "Signature: async def run(ctx, *, args='') -> str\n"
-            "Use discord.py ctx.send to reply. Keep it short & snappy.\n\n"
-            f"User request: {spec}"
-        )
-        try:
-            resp = await self.agent.arun(prompt)
-            code = resp.content.strip()
-            name = re.findall(r"def\s+(\w+)\s*\(", code)[0]
-            if name != "run":
-                code = code.replace(name, "run", 1)
-                name = "run"
-            self.registry[name] = code
-            self.save_registry()
-            self.bot.bot.add_command(commands.Command(self._callable(name), name=name))
-            await ctx.send(f"✅ Tool `!{name}` live!", delete_after=6)
-        except Exception as e:
-            await ctx.send(f"❌ {e}", delete_after=6)
+        response = await self.agent.arun(spec)
+        code = response.content.strip()
+        name = re.findall(r"def\s+(\w+)\s*\(", code)[0]
+        if name != "run":
+            code = code.replace(name, "run", 1)
+            name = "run"
+        self.registry[name] = code
+        self.save_registry()
+        self.bot.bot.add_command(commands.Command(self._callable(name), name=name))
+        await ctx.send(f"✅ Tool `!{name}` live!", delete_after=6)
 
     async def gen_image(self, ctx, *, prompt: str):
         """!gen an image of ..."""
