@@ -14,6 +14,8 @@ from agno.tools.file import FileTools
 from agno.tools.googlesearch import GoogleSearchTools
 from agno.tools.spider import SpiderTools
 from agno.tools.yfinance import YFinanceTools
+from agno.memory.v2.db.redis import RedisMemoryDb
+from agno.storage.redis import RedisStorage
 
 REGISTRY_FILE = "tools.json"
 CHAT_HISTORY = "chat_history.json"
@@ -115,9 +117,41 @@ class AgenticLayer:
 
     def _build_agent(self):
         instructions = Path("instructions.txt").read_text()
+
+        # Redis setup with error handling
+        try:
+            redis_pass = os.getenv("REDIS_PASSWORD")
+            if redis_pass:
+                memory = Memory(
+                    db=RedisMemoryDb(
+                        prefix="agno_memory",
+                        host="usable-marmot-6518.upstash.io",
+                        port=6379,
+                        password=redis_pass,
+                        ssl=True,
+                    )
+                )
+                storage = RedisStorage(
+                    prefix="agno_storage",
+                    host="usable-marmot-6518.upstash.io",
+                    port=6379,
+                    password=redis_pass,
+                    ssl=True,
+                )
+            else:
+                memory = None
+                storage = None
+        except Exception as e:
+            print(f"Error setting up Redis: {e}")
+            memory = None
+            storage = None
+
         return Agent(
             name="Mist",
             model=Groq(id="moonshotai/kimi-k2-instruct", api_key=os.getenv("GROQ_API_KEY")),
+            memory=memory,
+            storage=storage,
+            session_id="hero",
             tools=[
                 CalculatorTools(),
                 DuckDuckGoTools(),
