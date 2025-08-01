@@ -30,8 +30,6 @@ REGISTRY_FILE = "agentic_tools.json"
 class AgenticLayer:
     def __init__(self, bot: SelfBot):
         self.bot = bot
-        self.registry: Dict[str, str] = {}
-        self.load_registry()
         self.agent = self._build_agent()
 
         @bot.event
@@ -42,73 +40,46 @@ class AgenticLayer:
                 text = message.content[1:].strip()
                 if text:
                     print(f"Processing message: {text}")  # Debugging line
+                    response = await self.agent.arun(text)
+                    print(f"Agent response: {response.content}")  # Debugging line
+                    for chunk in (response.content[i:i+1900] for i in range(0, len(response.content), 1900)):
+                        await message.channel.send(chunk)
+
+                    # Check if the user wants to create a new tool
                     if "write and register a tool" in text.lower():
                         await self._create_tool(message, text)
-                    else:
-                        response = await self.agent.arun(text)
-                        print(f"Agent response: {response.content}")  # Debugging line
-                        for chunk in (response.content[i:i+1900] for i in range(0, len(response.content), 1900)):
-                            await message.channel.send(chunk)
 
     async def _create_tool(self, message, text):
-        max_retries = 5
-        retries = 0
-        success = False
+        # Extract the tool description from the message
+        tool_description = text.split("write and register a tool that", 1)[1].strip()
+        if not tool_description:
+            await message.channel.send("Please provide a description for the tool.")
+            return
 
-        while retries < max_retries and not success:
-            try:
-                # Extract the tool description from the message
-                tool_description = text.split("write and register a tool that", 1)[1].strip()
-                if not tool_description:
-                    await message.channel.send("Please provide a description for the tool.")
-                    return
+        # Generate the tool code using the agent
+        tool_code = await self.agent.arun(f"Write a single async Python function named 'run' that {tool_description}.")
+        if not tool_code.content:
+            await message.channel.send("Failed to generate the tool code.")
+            return
 
-                # Generate the tool code using the agent
-                tool_code = await self.agent.arun(f"Write a single async Python function named 'run' that {tool_description}.")
-                if not tool_code.content:
-                    await message.channel.send("Failed to generate the tool code.")
-                    retries += 1
-                    continue
+        # Extract the function name from the generated code
+        function_name = re.findall(r"def\s+(\w+)\s*\(", tool_code.content)
+        if not function_name:
+            await message.channel.send("Failed to extract the function name from the generated code.")
+            return
+        function_name = function_name[0]
 
-                # Extract the function name from the generated code
-                function_name = re.findall(r"def\s+(\w+)\s*\(", tool_code.content)
-                if not function_name:
-                    await message.channel.send("Failed to extract the function name from the generated code.")
-                    retries += 1
-                    continue
-                function_name = function_name[0]
-
-                # Register the tool
-                self.registry[function_name] = tool_code.content
-                self.save_registry()
-                self.bot.bot.add_command(commands.Command(self._callable(function_name), name=function_name))
-                await message.channel.send(f"✅ Tool `!{function_name}` registered. You can now use `!{function_name} <args>`.")
-                success = True
-            except Exception as e:
-                await message.channel.send(f"Failed to create tool: {e}")
-                retries += 1
-
-        if not success:
-            await message.channel.send("Failed to create the tool after multiple attempts.")
+        # Register the tool
+        self.bot.bot.add_command(commands.Command(self._callable(function_name), name=function_name))
+        self.registry[function_name] = tool_code.content
+        self.save_registry()
+        await message.channel.send(f"✅ Tool `!{function_name}` registered. You can now use `!{function_name} <args>`.")
 
     def _callable(self, name: str):
-        try:
-            code = self.registry[name]
-            loc = {}
-            exec(textwrap.dedent(code), loc)
-            return loc["run"]
-        except Exception as e:
-            print(f"Error in _callable: {e}")
-            raise
-
-    def load_registry(self):
-        if os.path.isfile(REGISTRY_FILE):
-            with open(REGISTRY_FILE) as f:
-                self.registry = json.load(f)
-
-    def save_registry(self):
-        with open(REGISTRY_FILE, "w") as f:
-            json.dump(self.registry, f, indent=2)
+        code = self.registry[name]
+        loc = {}
+        exec(textwrap.dedent(code), loc)
+        return loc["run"]
 
     def _build_agent(self):
         api_keys = {
@@ -118,6 +89,7 @@ class AgenticLayer:
             "redis": os.environ["REDIS_PASSWORD"],
         }
 
+        # Load instructions from file
         instructions = Path("instructions.txt").read_text()
 
         memory_db = RedisMemoryDb(
