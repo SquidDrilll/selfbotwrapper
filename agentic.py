@@ -3,21 +3,11 @@ import os
 import json
 import re
 import textwrap
-import aiohttp
-import asyncio
-import warnings
-from pathlib import Path
-from typing import Dict
 from discord.ext import commands
 from selfbot import SelfBot
 
-warnings.filterwarnings("ignore")
-
 from agno.agent import Agent
-from agno.memory.v2.db.redis import RedisMemoryDb
-from agno.memory.v2.memory import Memory
 from agno.models.groq import Groq
-from agno.storage.redis import RedisStorage
 from agno.tools.calculator import CalculatorTools
 from agno.tools.duckduckgo import DuckDuckGoTools
 from agno.tools.file import FileTools
@@ -69,10 +59,9 @@ class AgenticLayer:
                 for chunk in (response.content[i:i+1900] for i in range(0, len(response.content), 1900)):
                     await message.channel.send(chunk)
 
-            except Exception:
-                pass  # Never crash
+            except Exception as e:
+                print(f"Error processing message: {e}")  # Debugging log
 
-    # ---------- Tool creation ----------
     async def _create_tool(self, message, desc):
         while True:
             try:
@@ -99,7 +88,8 @@ class AgenticLayer:
                     res = await r.json()
                     if res.get("run", {}).get("code") == 0:
                         break
-            except Exception:
+            except Exception as e:
+                print(f"Error creating tool: {e}")  # Debugging log
                 await asyncio.sleep(1)
 
         self.registry[name] = code
@@ -113,7 +103,6 @@ class AgenticLayer:
         exec(textwrap.dedent(code), loc)
         return loc[name]
 
-    # ---------- Helpers ----------
     def _load_json(self, file: str, default):
         if Path(file).exists():
             with open(file, "r", encoding="utf-8") as f:
@@ -124,39 +113,11 @@ class AgenticLayer:
         with open(file, "w", encoding="utf-8") as f:
             json.dump(obj, f, indent=2)
 
-    # ---------- Build Agent ----------
     def _build_agent(self):
         instructions = Path("instructions.txt").read_text()
-
-        # Redis setup
-        redis_pass = os.getenv("REDIS_PASSWORD")
-        if redis_pass:
-            memory = Memory(
-                db=RedisMemoryDb(
-                    prefix="agno_memory",
-                    host="usable-marmot-6518.upstash.io",
-                    port=6379,
-                    password=redis_pass,
-                    ssl=True,
-                )
-            )
-            storage = RedisStorage(
-                prefix="agno_storage",
-                host="usable-marmot-6518.upstash.io",
-                port=6379,
-                password=redis_pass,
-                ssl=True,
-            )
-        else:
-            memory = None
-            storage = None
-
         return Agent(
             name="Mist",
             model=Groq(id="moonshotai/kimi-k2-instruct", api_key=os.getenv("GROQ_API_KEY")),
-            memory=memory,
-            storage=storage,
-            session_id="hero",
             tools=[
                 CalculatorTools(),
                 DuckDuckGoTools(),
