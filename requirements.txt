@@ -1,12 +1,15 @@
 # ---------- core ----------
 python-dotenv
-daytona
+discord.py-self==1.7.3
+agno==1.7.6
 
 # ---------- LLMs ----------
 groq
+openai
 
 # ---------- data & storage ----------
-yfinance  # built-in, safe to list
+yfinance
+redis
 
 # ---------- web & scraping ----------
 duckduckgo-search
@@ -21,15 +24,8 @@ daytona-sdk
 
 # ---------- media ----------
 replicate
-
-# ---------- optional helpers ----------
-pydantic
-discord.py-self==1.7.3
-python-dotenv
-agno==1.7.6
 pillow
 
+# ---------- helpers ----------
 aiohttp
-redis
-openai
-yfinance
+pydantic
