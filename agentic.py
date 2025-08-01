@@ -1,7 +1,11 @@
 # agentic.py
-import os, json, re, inspect, textwrap, asyncio, aiohttp, traceback
+import os
+import json
+import re
+import textwrap
+import aiohttp
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict
 from discord.ext import commands
 from selfbot import SelfBot
 
@@ -13,7 +17,6 @@ from agno.models.groq import Groq
 from agno.storage.redis import RedisStorage
 from agno.tools.calculator import CalculatorTools
 from agno.tools.crawl4ai import Crawl4aiTools
-from agno.tools.daytona import DaytonaTools
 from agno.tools.duckduckgo import DuckDuckGoTools
 from agno.tools.file import FileTools
 from agno.tools.firecrawl import FirecrawlTools
@@ -31,7 +34,7 @@ class AgenticLayer:
         self.registry: Dict[str, str] = {}
         self.load_registry()
 
-        # build the core Agno agent (same as your Replit setup)
+        # build the core Agno agent
         self.agent = self._build_agent()
 
         # meta commands
@@ -58,7 +61,6 @@ class AgenticLayer:
             "groq": os.environ["GROQ_API_KEY"],
             "firecrawl": os.environ["FIRECRAWL_API_KEY"],
             "replicate": os.environ["REPLICATE_API_KEY"],
-            "daytona": os.environ["DAYTONA_API_KEY"],
             "redis": os.environ["REDIS_PASSWORD"],
         }
 
@@ -82,16 +84,19 @@ class AgenticLayer:
         tools = [
             DuckDuckGoTools(),
             GoogleSearchTools(),
-            CalculatorTools(add=True, subtract=True, multiply=True, divide=True,
-                            exponentiate=True, factorial=True, is_prime=True, square_root=True),
+            CalculatorTools(
+                add=True, subtract=True, multiply=True, divide=True,
+                exponentiate=True, factorial=True, is_prime=True, square_root=True
+            ),
             FileTools(),
             WebsiteTools(),
             SpiderTools(),
             FirecrawlTools(api_key=api_keys["firecrawl"]),
             Crawl4aiTools(),
-            YFinanceTools(stock_price=True, analyst_recommendations=True,
-                          company_news=True, stock_fundamentals=True, company_info=True),
-            DaytonaTools(api_key=api_keys["daytona"]),
+            YFinanceTools(
+                stock_price=True, analyst_recommendations=True,
+                company_news=True, stock_fundamentals=True, company_info=True
+            ),
             ReplicateTools(model="luma/photon-flash", api_key=api_keys["replicate"]),
         ]
 
