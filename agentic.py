@@ -11,6 +11,7 @@ from agno.memory.v2.db.redis import RedisMemoryDb
 from agno.memory.v2.memory import Memory
 from agno.models.groq import Groq
 from agno.storage.redis import RedisStorage
+from agno.tools.daytona import DaytonaTools
 
 REGISTRY_FILE = "agentic_tools.json"
 
@@ -75,6 +76,7 @@ class AgenticLayer:
     def _build_agent(self):
         api_keys = {
             "groq": os.environ["GROQ_API_KEY"],
+            "daytona": os.environ["DAYTONA_API_KEY"],
             "redis": os.environ["REDIS_PASSWORD"],
         }
 
@@ -95,12 +97,17 @@ class AgenticLayer:
             ssl=True,
         )
 
+        tools = [
+            DaytonaTools(api_key=api_keys["daytona"]),
+        ]
+
         return Agent(
             name="Mist",
             model=Groq(id="moonshotai/kimi-k2-instruct", api_key=api_keys["groq"]),
             memory=Memory(db=memory_db),
             storage=storage,
             session_id="hero",
+            tools=tools,
             description="A helpful personal assistant chatbot that can search the web, generate images, and remember user preferences.",
             instructions=instructions,
             add_history_to_messages=True,
