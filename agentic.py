@@ -45,6 +45,42 @@ class AgenticLayer:
                     for chunk in (response.content[i:i+1900] for i in range(0, len(response.content), 1900)):
                         await message.channel.send(chunk)
 
+                    # Check if the user wants to create a new tool
+                    if "write and register a tool" in text.lower():
+                        await self._create_tool(message, text)
+
+    async def _create_tool(self, message, text):
+        # Extract the tool description from the message
+        tool_description = text.split("write and register a tool that", 1)[1].strip()
+        if not tool_description:
+            await message.channel.send("Please provide a description for the tool.")
+            return
+
+        # Generate the tool code using the agent
+        tool_code = await self.agent.arun(f"Write a single async Python function named 'run' that {tool_description}.")
+        if not tool_code.content:
+            await message.channel.send("Failed to generate the tool code.")
+            return
+
+        # Extract the function name from the generated code
+        function_name = re.findall(r"def\s+(\w+)\s*\(", tool_code.content)
+        if not function_name:
+            await message.channel.send("Failed to extract the function name from the generated code.")
+            return
+        function_name = function_name[0]
+
+        # Register the tool
+        self.bot.bot.add_command(commands.Command(self._callable(function_name), name=function_name))
+        self.registry[function_name] = tool_code.content
+        self.save_registry()
+        await message.channel.send(f"✅ Tool `!{function_name}` registered. You can now use `!{function_name} <args>`.")
+
+    def _callable(self, name: str):
+        code = self.registry[name]
+        loc = {}
+        exec(textwrap.dedent(code), loc)
+        return loc["run"]
+
     def _build_agent(self):
         api_keys = {
             "groq": os.environ["GROQ_API_KEY"],
@@ -53,6 +89,7 @@ class AgenticLayer:
             "redis": os.environ["REDIS_PASSWORD"],
         }
 
+        # Load instructions from file
         instructions = Path("instructions.txt").read_text()
 
         memory_db = RedisMemoryDb(
@@ -96,6 +133,7 @@ class AgenticLayer:
             storage=storage,
             session_id="hero",
             tools=tools,
+            description="A helpful personal assistant chatbot that can search the web, generate images, and remember user preferences.",
             instructions=instructions,
             add_history_to_messages=True,
             num_history_runs=3,
