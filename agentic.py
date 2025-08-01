@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Dict
 from discord.ext import commands
 from selfbot import SelfBot
-import time
 
 from agno.agent import Agent
 from agno.models.groq import Groq
@@ -32,7 +31,6 @@ class AgenticLayer:
         self.registry = self._load_json(REGISTRY_FILE, {})
         self.chats = self._load_json(CHAT_HISTORY, {})
         self.agent = self._build_agent()
-        self.cooldown = {}
 
         @bot.event
         async def on_message(message):
@@ -51,13 +49,6 @@ class AgenticLayer:
             })
             self._save_json(CHAT_HISTORY, self.chats)
 
-            # Rate limiting
-            current_time = time.time()
-            if cid in self.cooldown and current_time - self.cooldown[cid] < 60:
-                print(f"Cooldown active for channel {cid}")
-                return
-            self.cooldown[cid] = current_time
-
             try:
                 # 1. Create tool
                 if text.lower().startswith("create tool"):
@@ -72,12 +63,8 @@ class AgenticLayer:
 
                 # 3. Chat / run tool
                 response = await self.agent.arun(text)
-                if response and response.content:
-                    for chunk in (response.content[i:i+1900] for i in range(0, len(response.content), 1900)):
-                        if chunk.strip():  # Ensure the response is not just whitespace
-                            await message.channel.send(chunk)
-                else:
-                    print(f"Irrelevant response from agent: {response}")
+                for chunk in (response.content[i:i+1900] for i in range(0, len(response.content), 1900)):
+                    await message.channel.send(chunk)
 
             except Exception as e:
                 print(f"Error processing message: {e}")  # Debugging log
@@ -137,18 +124,23 @@ class AgenticLayer:
         instructions = Path("instructions.txt").read_text()
 
         # Redis setup
-        redis_url = os.getenv("UPSTASH_REDIS_URL")
-        if redis_url:
+        redis_url = os.getenv("UPSTASH_REDIS_REST_URL")
+        redis_token = os.getenv("UPSTASH_REDIS_REST_TOKEN")
+        if redis_url and redis_token:
             memory = Memory(
                 db=RedisMemoryDb(
                     prefix="agno_memory",
-                    url=redis_url,
+                    host=redis_url,
+                    port=6379,
+                    password=redis_token,
                     ssl=True,
                 )
             )
             storage = RedisStorage(
                 prefix="agno_storage",
-                url=redis_url,
+                host=redis_url,
+                port=6379,
+                password=redis_token,
                 ssl=True,
             )
         else:
