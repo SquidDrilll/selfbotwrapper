@@ -12,97 +12,95 @@ from selfbot import SelfBot
 
 from agno.agent import Agent
 from agno.models.groq import Groq
+from agno.memory.v2.db.redis import RedisMemoryDb
+from agno.memory.v2.memory import Memory
+from agno.storage.redis import RedisStorage
 from agno.tools.calculator import CalculatorTools
 from agno.tools.duckduckgo import DuckDuckGoTools
 from agno.tools.file import FileTools
 from agno.tools.googlesearch import GoogleSearchTools
 from agno.tools.spider import SpiderTools
 from agno.tools.yfinance import YFinanceTools
-from agno.memory.v2.db.redis import RedisMemoryDb
-from agno.memory.v2.memory import Memory
-from agno.storage.redis import RedisStorage
 
-REGISTRY_FILE = "tools.json"
-CHAT_HISTORY = "chat_history.json"
+REGISTRY_FILE   = "tools.json"
+CHAT_HISTORY    = "chat_history.json"
 
 class AgenticLayer:
     def __init__(self, bot: SelfBot):
-        self.bot = bot
-        self.registry = self._load_json(REGISTRY_FILE, {})
-        self.chats = self._load_json(CHAT_HISTORY, {})
-        self.agent = self._build_agent()
+        self.bot      = bot
+        self.registry = self._load_json(REGISTRY_FILE, {})   # auto-tools
+        self.chats    = self._load_json(CHAT_HISTORY, {})    # DM / group history
+        self.agent    = self._build_agent()
+
+        # expose auto-generated tools
+        for name in self.registry:
+            self.bot.bot.add_command(commands.Command(self._callable(name), name=name))
 
         @bot.event
         async def on_message(message):
             if message.author.id != bot.bot.user.id:
                 return
+
             text = message.content.lstrip(".")
             if not text:
                 return
 
-            # Record chat (DM / group)
             cid = str(message.channel.id)
+            # record chat
             self.chats.setdefault(cid, []).append({
                 "author": str(message.author),
-                "msg": message.content,
-                "ts": message.created_at.isoformat()
+                "msg":    message.content,
+                "ts":     message.created_at.isoformat()
             })
             self._save_json(CHAT_HISTORY, self.chats)
 
             try:
-                # 1. Create tool
+                # 1. dynamic tool creation
                 if text.lower().startswith("create tool"):
                     await self._create_tool(message, text[11:].strip())
                     return
 
-                # 2. List tools
+                # 2. list tools
                 if text.lower() == "list tools":
                     tools = ", ".join(self.registry.keys()) or "none"
                     await message.channel.send(f"Tools: {tools}")
                     return
 
-                # 3. Chat / run tool
-                response = await self.agent.arun(text)
-                for chunk in (response.content[i:i+1900] for i in range(0, len(response.content), 1900)):
-                    await message.channel.send(chunk)
+                # 3. single detailed reply
+                reply = (await self.agent.arun(text)).content.strip()[:1900]
+                await message.channel.send(reply)
 
             except Exception as e:
-                print(f"Error processing message: {e}")  # Debugging log
+                await message.channel.send("Error: " + str(e)[:1900])
 
+    # ---------- auto-tool engine ----------
     async def _create_tool(self, message, desc):
         while True:
             try:
                 prompt = (
-                    f"Write a single async Python function named 'run' that {desc}. "
-                    "It must accept (ctx, *, query) and return str. "
-                    "Use only aiohttp / requests / standard libs. "
-                    "End with return str(...)."
+                    f"Write an async Python function named 'run' that {desc}. "
+                    "Signature: async def run(ctx, *, query='') -> str. "
+                    "Use aiohttp or standard libs only."
                 )
                 code_raw = await self.agent.arun(prompt)
                 code = textwrap.dedent(code_raw.content).strip()
                 name = re.findall(r"def\s+(\w+)\s*\(", code)[0]
 
-                # Local compile test
-                loc = {}
-                exec(code, loc)
-                func = loc[name]
-
-                # Remote sandbox test
+                # sandbox test
                 test_src = code + '\nimport asyncio; asyncio.run(run(None, query="test"))'
-                payload = {"language": "python", "source": test_src}
+                payload  = {"language": "python", "source": test_src}
                 async with aiohttp.ClientSession() as s:
                     r = await s.post("https://emkc.org/api/v1/piston/execute", json=payload)
                     res = await r.json()
                     if res.get("run", {}).get("code") == 0:
                         break
-            except Exception as e:
-                print(f"Error creating tool: {e}")  # Debugging log
+            except Exception:
                 await asyncio.sleep(1)
 
-        self.registry[name] = code
-        self._save_json(REGISTRY_FILE, self.registry)
-        self.bot.bot.add_command(commands.Command(self._callable(name), name=name))
-        await message.channel.send(f"✅ Tool `!{name}` ready.")
+            self.registry[name] = code
+            self._save_json(REGISTRY_FILE, self.registry)
+            self.bot.bot.add_command(commands.Command(self._callable(name), name=name))
+            await message.channel.send(f"✅ Tool `!{name}` ready.")
 
     def _callable(self, name: str):
         code = self.registry[name]
@@ -123,41 +121,33 @@ class AgenticLayer:
     def _build_agent(self):
         instructions = Path("instructions.txt").read_text()
 
-        # Redis setup
-        redis_url = os.getenv("UPSTASH_REDIS_REST_URL")
-        redis_token = os.getenv("UPSTASH_REDIS_REST_TOKEN")
-        if redis_url and redis_token:
-            memory = Memory(
-                db=RedisMemoryDb(
-                    prefix="agno_memory",
-                    host=redis_url,
-                    port=6379,
-                    password=redis_token,
-                    ssl=True,
-                )
+        redis_url = os.getenv("UPSTASH_REDIS_URL")
+        if redis_url:
+            memory_db = RedisMemoryDb(
+                prefix="agno_memory",
+                url=redis_url,
+                ssl=True,
             )
             storage = RedisStorage(
                 prefix="agno_storage",
-                host=redis_url,
-                port=6379,
-                password=redis_token,
+                url=redis_url,
                 ssl=True,
             )
         else:
-            memory = None
+            memory_db = None
             storage = None
 
         return Agent(
             name="Mist",
             model=Groq(id="moonshotai/kimi-k2-instruct", api_key=os.getenv("GROQ_API_KEY")),
-            memory=memory,
+            memory=Memory(db=memory_db),
             storage=storage,
             session_id="hero",
             tools=[
-                CalculatorTools(),
                 DuckDuckGoTools(),
-                FileTools(),
                 GoogleSearchTools(),
+                CalculatorTools(),
+                FileTools(),
                 SpiderTools(),
                 YFinanceTools(
                     stock_price=True,
@@ -166,8 +156,8 @@ class AgenticLayer:
                     stock_fundamentals=True,
                     company_info=True,
                 ),
+                ReplicateTools(model="luma/photon-flash", api_key=os.getenv("REPLICATE_API_KEY")),
             ],
-            description="A self-bot that remembers every chat and creates tools on demand.",
             instructions=instructions,
             add_history_to_messages=True,
             num_history_runs=1000,
