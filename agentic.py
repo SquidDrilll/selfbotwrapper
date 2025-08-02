@@ -59,22 +59,27 @@ class AgenticLayer:
     def _save_json(self, file: str, obj):
         Path(file).write_text(json.dumps(obj, indent=2))
 
-    def _build_agent(self):
-        redis_url = os.getenv("UPSTASH_REDIS_URL")
-        if redis_url:
-            memory_db = RedisMemoryDb(
-                prefix="agno_memory",
-                url=redis_url,
-                ssl=True,
-            )
-            storage = RedisStorage(
-                prefix="agno_storage",
-                url=redis_url,
-                ssl=True,
-            )
-        else:
-            memory_db = None
-            storage = None
+        def _build_agent(self):
+        instructions = Path("instructions.txt").read_text()
+
+        redis_host = "usable-marmot-6518.upstash.io"
+        redis_port = 6379
+        redis_password = os.getenv("UPSTASH_REDIS_PASSWORD")
+
+        memory_db = RedisMemoryDb(
+            prefix="agno_memory",
+            host=redis_host,
+            port=redis_port,
+            password=redis_password,
+            ssl=True,
+        )
+        storage = RedisStorage(
+            prefix="agno_storage",
+            host=redis_host,
+            port=redis_port,
+            password=redis_password,
+            ssl=True,
+        )
 
         return Agent(
             name="Mist",
@@ -96,7 +101,7 @@ class AgenticLayer:
                     company_info=True,
                 ),
             ],
-            instructions=Path("instructions.txt").read_text(),
+            instructions=instructions,
             add_history_to_messages=True,
             num_history_runs=1000,
             markdown=True,
