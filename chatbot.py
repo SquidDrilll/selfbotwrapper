@@ -28,6 +28,11 @@ SYSTEM_PROMPT = (
     "Always aim to provide the most helpful and accurate response possible, while maintaining a friendly and engaging tone. "
     "If you encounter any issues or errors, provide a clear and concise explanation of the problem and suggest possible solutions. "
     "Remember to stay within the bounds of appropriate and respectful conversation at all times."
+    "\nIf the user adds \"--web\" you may use these tools once each:\n"
+    "- {\"tool\": \"search_google\", \"query\": \"<terms>\"}\n"
+    "- {\"tool\": \"fetch_url\", \"url\": \"<full url>\"}\n"
+    "Reply with **only** the JSON block to call a tool; otherwise answer normally."
+    
 )
 # ---------- redis ----------
 async def _load_mem():
@@ -130,7 +135,24 @@ async def _exec_tool(name: str, kwargs: dict, ctx: commands.Context) -> str:
     if "ctx" in func.__code__.co_varnames:
         kwargs["ctx"] = ctx
     return await func(**{k: v for k, v in kwargs.items() if k != "tool"})
+# ---------- web tools (ADDITION) ----------
+async def google_search(query: str, num: int = 3) -> str:
+    search = GoogleSearch({"q": query, "engine": "google", "num": num, "api_key": SERPER_KEY})
+    data = search.get_dict()
+    results = data.get("organic_results", [])
+    return "\n".join(f"{i+1}. {r['title']} – {r['snippet']}" for i, r in enumerate(results)) or "No results."
 
+async def fetch_url(url: str) -> str:
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=8)) as s:
+            async with s.get(url, headers={"User-Agent": "selfbot-agent/1.0"}) as r:
+                text = await r.text()
+                text = re.sub(r"<[^>]+>", "", text)
+                text = re.sub(r"\s+", " ", text)
+                return text[:3_000]
+    except Exception as e:
+        return f"Fetch error: {e}"
+        
 # ---------- static tools ----------
 async def google_search(query: str, num: int = 3) -> str:
     search = GoogleSearch({"q": query, "engine": "google", "num": num, "api_key": SERPER_KEY})
@@ -187,6 +209,7 @@ async def _test_tool(name: str, test_query: str) -> bool:
         return False
 # ---------- agent ----------
 async def agent_turn(user_text: str, memory: list, ctx: commands.Context) -> str:
+        # ---------- NEW AGENT CORE (web-aware) ----------
     dyn = await _list_tools()
     dyn_desc = "\n".join(f"- {n}: {s}" for n, s in dyn)
     tool_desc = f"""
@@ -201,43 +224,66 @@ dynamic:
 {dyn_desc}
 """.strip()
 
-    msgs = [{"role": "system", "content": SYSTEM_PROMPT + "\n" + tool_desc}]
+    # detect flags
+    web_mode  = user_text.endswith("--web")
+    long_mode = user_text.endswith("--long")
+    if web_mode or long_mode:
+        user_text = user_text.rsplit("--", 1)[0].rstrip()
+
+    base = SYSTEM_PROMPT
+    if long_mode:
+        base += "\nProvide a **detailed** comprehensive answer with full markdown formatting."
+    if web_mode:
+        base += "\nYou may use web tools once each if needed."
+
+    msgs = [{"role": "system", "content": base + "\n" + tool_desc}]
     msgs.extend(_trim(memory, MAX_TOKENS))
     msgs.append({"role": "user", "content": user_text})
 
-    response = await client.chat.completions.create(
-        model="moonshotai/kimi-k2-instruct",
-        messages=msgs,
-        temperature=0.3,
-        max_tokens=350,
-        stop=["\n\n"]
-    )
-    text = response.choices[0].message.content.strip()
+    # tool loop (max 2 rounds)
+    for _ in range(2):
+        response = await client.chat.completions.create(
+            model="moonshotai/kimi-k2-instruct",
+            messages=msgs,
+            temperature=0.3,
+            max_tokens=350,
+            stop=["\n\n"]
+        )
+        text = response.choices[0].message.content.strip()
 
-    if text.startswith("{") and text.endswith("}"):
-        try:
-            call = json.loads(text)
-            tool = call.get("tool")
-            if tool == "search_google":
-                return f"🔍 Google results:\n{await google_search(call['query'])}"
-            if tool == "fetch_url":
-                return f"📄 Page content:\n{await fetch_url(call['url'])}"
-            if tool == "python_exec":
-                return f"🐍 Output:\n{await python_exec(call['code'])}"
-            if tool == "add_tool":
-                await _save_tool(call["name"], call["schema"], call["code"])
-                return f"Tool `{call['name']}` registered."
-            if tool == "remove_tool":
-                r = redis.from_url(os.getenv("REDIS_URL"))
-                await r.delete(f"tool:{call['name']}")
-                await r.close()
-                return f"Tool `{call['name']}` removed."
-            if tool in {n for n, _ in dyn}:
-                return await _exec_tool(tool, call, ctx)
-        except Exception as e:
-            return f"Tool failed: {e}"
+        if text.startswith("{") and text.endswith("}"):
+            try:
+                call = json.loads(text)
+                tool = call.get("tool")
+                if tool == "search_google" and web_mode:
+                    res = await google_search(call["query"])
+                    msgs.append({"role": "system", "content": f"Web results:\n{res}"})
+                    continue
+                if tool == "fetch_url" and web_mode:
+                    res = await fetch_url(call["url"])
+                    msgs.append({"role": "system", "content": f"Page content:\n{res}"})
+                    continue
+                # keep your original static tools
+                if tool == "search_google":
+                    return f"🔍 Google results:\n{await google_search(call['query'])}"
+                if tool == "fetch_url":
+                    return f"📄 Page content:\n{await fetch_url(call['url'])}"
+                if tool == "python_exec":
+                    return f"🐍 Output:\n{await python_exec(call['code'])}"
+                if tool == "add_tool":
+                    await _save_tool(call["name"], call["schema"], call["code"])
+                    return f"Tool `{call['name']}` registered."
+                if tool == "remove_tool":
+                    r = redis.from_url(os.getenv("REDIS_URL"))
+                    await r.delete(f"tool:{call['name']}")
+                    await r.close()
+                    return f"Tool `{call['name']}` removed."
+                if tool in {n for n, _ in dyn}:
+                    return await _exec_tool(tool, call, ctx)
+            except Exception as e:
+                return f"Tool failed: {e}"
+        break  # no more tools
     return text
-
 # ---------- discord ----------
 def setup_chat(bot):
     @bot.command(name=".")
