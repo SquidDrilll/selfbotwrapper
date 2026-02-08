@@ -1,27 +1,40 @@
-#Dockerfile
+# syntax=docker/dockerfile:1.7
 
-#use python 3.12 and install redis too
+############################
+#    BUILDER STAGE         #
+############################
+FROM python:3.12-slim AS builder
 
-FROM python:3.12-slim
-
-# Install redis server and git (required for pip to install from Git URLs)
-RUN apt-get update && \
-    apt-get install -y redis-server git && \
-    rm -rf /var/lib/apt/lists/*
-
-# Set working directory
 WORKDIR /app
 
-# Copy requirements and install Python dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Install git only in the builder (needed for Git dependencies)
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends git && \
+    rm -rf /var/lib/apt/lists/*
 
-# Copy the rest of the application code
+# Install uv
+RUN pip install uv
+
+# Copy dependency files (only these to maximize caching)
+COPY pyproject.toml uv.lock ./
+
+# Install dependencies using uv with full caching
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev
+
+
+############################
+#    FINAL STAGE           #
+############################
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# Copy the environment created by uv from builder
+COPY --from=builder /app/.venv .venv
+
+# Copy source code
 COPY . .
 
-# Expose Redis default port
-EXPOSE 6379
-
-# Default command (can be overridden)
-# Start Redis and then the app
-CMD ["bash", "-lc", "redis-server --daemonize yes && python main.py"]
+# Use .venv Python
+CMD [".venv/bin/python", "main.py"]

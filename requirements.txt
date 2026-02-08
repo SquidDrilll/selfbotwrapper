@@ -1,18 +1,19 @@
-agno==2.0.11
-openai==1.109.1
-arize-phoenix==7.9.0
+agno
+openai>=1.77.0
+arize-phoenix
 openinference-instrumentation-agno
 opentelemetry-sdk
 opentelemetry-exporter-otlp
+atla-insights[openai]
 # Pin discord.py-self to a commit known to work with Python 3.12
 git+https://github.com/dolfies/discord.py-self.git@97e06c393f6e8f30d00fe0dd9cdf7196145fa851#egg=discord.py-self
 
 # Environment variable management
 python-dotenv>=1.0.0
-
+#
 
 # Async HTTP support (may be needed for API calls)
-aiohttp>=3.8.0
+aiohttp
 
 serpapi 
 redis
@@ -22,5 +23,6 @@ pycountry
 wikipedia
 exa-py
 mcp
-pydantic<2.10
-uvicorn<0.30
+pydantic
+uvicorn
+pytz>=2024.1
